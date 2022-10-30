@@ -1,4 +1,4 @@
-# ODMB7/5 Development
+# Optical Communication Firmware Development
 
 This repository contains the most up to date version of firmware for optical communication. Currently the firmware has only been tested on the KCU105 board, for the future we expect to add the ODMB5 and ODMB7 boards to the list.
 

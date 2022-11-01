@@ -101,7 +101,7 @@ module gth_unit_example_checking_8b10b (
   // to check a PRBS31 sequence with parallel data sized to the receiver user data width.
   wire [31:0] prbs_any_chk_error_int;
 
-  gth_unit_prbs_any # (
+  gth_unit_prbs_any_counter # (
     .CHK_MODE    (1),
     .INV_PATTERN (1),
     .POLY_LENGHT (31),
@@ -115,13 +115,17 @@ module gth_unit_example_checking_8b10b (
     .DATA_OUT (prbs_any_chk_error_int)
   );
 
+
+
   // The prbs_any block indicates a match of the parallel PRBS data when all DATA_OUT bits are 0. Register the result
   // of the NOR function as the PRBS match indicator.
   always @(posedge gtwiz_userclk_rx_usrclk2_in) begin
-    if (example_checking_reset_sync)
+    if (example_checking_reset_sync) begin
       prbs_match_out <= 1'b0;
-    else
+    end
+    else begin
       prbs_match_out <= ~(|prbs_any_chk_error_int);
+    end
   end
 
 

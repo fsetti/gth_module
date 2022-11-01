@@ -437,6 +437,7 @@ module gth_unit_example_top (
   // Declare a signal vector of PRBS match indicators, with one indicator bit per transceiver channel
   wire [0:0] prbs_match_int;
 
+
   // PRBS-based data checking module for transceiver channel 0
   gth_unit_example_checking_8b10b example_checking_inst0 (
     .gtwiz_reset_all_in          (hb_gtwiz_reset_all_int || ~hb0_gtwiz_reset_rx_done_int ),
@@ -778,17 +779,9 @@ txrx_ila ila_ex (
 
  wire [31:0]  fifo_din;
  assign fifo_din = hb0_gtwiz_userdata_tx_int; //first block
- //assign fifo_din[39:32] = hb0_gtwiz_userdata_tx_int[31:24]; //first block
- //assign fifo_din[31:30] = 2'b00;                             // end of first block
- //assign fifo_din[29:22] = hb0_gtwiz_userdata_tx_int[23:16]; //second block
- //assign fifo_din[21:20] = 2'b00;                             // end of second block
- //assign fifo_din[19:12] = hb0_gtwiz_userdata_tx_int[15:8]; //third block
- //assign fifo_din[11:10] = 2'b00;                             // end of third block
- //assign fifo_din[9:2]   = hb0_gtwiz_userdata_tx_int[7:0]; //fourth block
- //assign fifo_din[1:0]   = 2'b00;                             // end of fourth block
- reg fifo_wr_en     = 1'd1;
- reg fifo_rd_en     = 1'd1;
- wire [63:0]  fifo_dout;
+ wire fifo_wr_en    ;
+ wire fifo_rd_en    ;
+ wire [31:0]  fifo_dout;
  wire fifo_full;
  wire fifo_almost_full  ;
  wire fifo_empty        ;
@@ -798,18 +791,25 @@ txrx_ila ila_ex (
  wire fifo_wr_rst_busy  ;
  wire fifo_rd_rst_busy  ;
  wire fifo_wr_ack;
+ wire fifo_valid;
+ wire fifo_underflow;
+ 
+ assign fifo_wr_en = ~gtwiz_userclk_tx_reset_int;
+ assign fifo_rd_en = ~fifo_almost_empty;
  
  //adding FIFO
  fifo_generator_0 fifo (
-    .rst                (gtwiz_userclk_tx_reset_int)
+    .rst                (gtwiz_userclk_rx_reset_int)
     ,.wr_clk            (gtwiz_userclk_tx_usrclk2_int)
-    ,.rd_clk            (wiz_clk_hlf)
+    ,.rd_clk            (gtwiz_userclk_rx_usrclk2_int)
     ,.din               (fifo_din)
     ,.wr_en             (fifo_wr_en)
     ,.rd_en             (fifo_rd_en)
     ,.dout              (fifo_dout)
     ,.full              (fifo_full)
     ,.almost_full       (fifo_almost_full)
+    ,.valid             (fifo_valid)
+    ,.underflow         (fifo_underflow)
     ,.empty             (fifo_empty)
     ,.almost_empty      (fifo_almost_empty)
     ,.rd_data_count     (fifo_rd_data_count)
@@ -819,22 +819,6 @@ txrx_ila ila_ex (
     ,.wr_ack            (fifo_wr_ack)
     );
  
-  wire [63:0]  ila_fifo_0;
-  wire [63:0]  ila_fifo_1;
-
-
-  assign ila_fifo_0[31:0]   =  fifo_din;
-  assign ila_fifo_0[32]     =  fifo_wr_ack;
-  assign ila_fifo_0[33]     =  fifo_full;
-  assign ila_fifo_0[34]     =  fifo_almost_full;
-  
-  
-fifo_ila ila_fifo (
-  .clk(gtwiz_userclk_tx_usrclk2_int),
-  .probe0(ila_fifo_0), // input [15 : 0] PROBE0
-  .probe1(ila_fifo_1) // input [15 : 0] PROBE1
-);
-
 
   wire [79:0]  ila_fifo_rd_0;
   assign ila_fifo_rd_0[63:0]  =  fifo_dout;
@@ -863,6 +847,66 @@ clk_wiz_0 clock_generator (
  // Clock in ports
   ,.clk_in1          (mmcm_clk_in)
   );
+
+ wire [31:0] check_txdata_fifo;
+ wire berr_fifo_full;
+ wire berr_fifo_almost_full  ;
+ wire berr_fifo_empty        ;
+ wire berr_fifo_almost_empty ;
+ wire berr_fifo_wr_rst_busy  ;
+ wire berr_fifo_rd_rst_busy  ;
+ wire berr_fifo_wr_ack;
+ wire berr_fifo_valid;
+ wire berr_fifo_underflow;
+ 
+ wire berr_rd_en = ( (~ch0_rxcommadet_int[0]) && ch0_rxbyteisaligned_int );
+ wire berr_wr_en = ( (~txctrl2_int[0]) &&  gtwiz_userdata_tx_int !== 32'b0) ;
+ 
+berr_fifo fifo_berr( 
+  .wr_rst             (gtwiz_userclk_tx_reset_int)
+  ,.wr_clk            (gtwiz_userclk_tx_usrclk2_int)
+  ,.rd_rst            (gtwiz_userclk_rx_reset_int)
+  ,.rd_clk            (gtwiz_userclk_rx_usrclk2_int)
+  ,.din               (hb0_gtwiz_userdata_tx_int)
+  ,.wr_en             (berr_wr_en)
+  ,.rd_en             (berr_rd_en)
+  ,.dout              (check_txdata_fifo)
+  ,.full              (berr_fifo_full)
+  ,.almost_full       (berr_fifo_almost_full)
+  ,.valid             (berr_fifo_valid)
+  ,.underflow         (berr_fifo_underflow)
+  ,.empty             (berr_fifo_empty)
+  ,.almost_empty      (berr_fifo_almost_empty)
+  ,.wr_ack            (berr_fifo_wr_ack)
+);    
+
+
+  integer nbits_tot = 0;
+  integer nbits_unmatched = 0;
+
+  always @(posedge gtwiz_userclk_rx_usrclk2_int && berr_rd_en == 1'b1) begin
+      nbits_tot <= nbits_tot + 1;
+      if ( check_txdata_fifo != gtwiz_userdata_rx_int )begin
+          nbits_unmatched <= nbits_unmatched + 1;
+      end
+  end
+
+  wire [63:0]  ila_fifo_0;
+  wire [63:0]  ila_fifo_1;
+
+
+  assign ila_fifo_0[31:0]  =  check_txdata_fifo;
+  assign ila_fifo_0[63:32] =  gtwiz_userdata_rx_int;
+  assign ila_fifo_1[31:0]  =  nbits_tot;
+  assign ila_fifo_1[63:32] =  nbits_unmatched;
+  
+  
+fifo_ila ila_fifo (
+  .clk(gtwiz_userclk_rx_usrclk2_int),
+  .probe0(ila_fifo_0), // input [15 : 0] PROBE0
+  .probe1(ila_fifo_1) // input [15 : 0] PROBE1
+);
+
 
 
 endmodule
